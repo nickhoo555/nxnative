@@ -5,6 +5,9 @@
 
 static int apple_init, apple_routes, writes;
 static uint32_t players;
+static dm_motion motion;
+static int motion_on;
+void dm_pad_motion(int p, const dm_motion *m) { (void)p; motion_on = m != NULL; if (m) motion = *m; }
 static int32_t left_x;
 int g_swkbd_min_chars;
 void dm_input_set(uint64_t b, int32_t lx, int32_t ly, int32_t rx, int32_t ry) { (void)b; (void)lx; (void)ly; (void)rx; (void)ry; }
@@ -35,19 +38,21 @@ int main(int argc, char **argv) { @autoreleasepool {
     void *lib = dlopen(argv[1], RTLD_NOW | RTLD_LOCAL); assert(lib);
     void (*add)(int, const char *) = dlsym(lib, "fake_add"); assert(add);
     void (*axis)(int, int, int16_t) = dlsym(lib, "fake_axis"); assert(axis);
+    void (*set_motion)(int, const float *, const float *) = dlsym(lib, "fake_motion"); assert(set_motion);
     unsigned (*rumble)(int) = dlsym(lib, "fake_rumble"); assert(rumble);
-    add(0, "S820"); axis(0, 0, 24000); sdl_tick();
+    add(0, "S820"); set_motion(0, (float[]){0, 9.80665f, 0}, (float[]){0, 1, 0}); axis(0, 0, 24000); sdl_tick();
     assert(players == 1 && left_x == 24000 && dm_haptics_available() == 1);
     dm_vibration_update u = {.player = 0, .motor = 0, .value = {.amplitude_low = .5f, .frequency_low = 160, .frequency_high = 320}};
     dm_haptics_send(&u, 1); sdl_tick(); assert(rumble(0));
-    input_release(); assert(!left_x && !rumble(0));
+    assert(motion_on && motion.gyro[2] > 0);
+    input_release(); assert(!left_x && !rumble(0) && !motion_on);
     int before = writes;
     axis(0, 0, -24000); sdl_tick(); assert(writes == before && !left_x);
-    input_resume(); assert(left_x == -24000 && !rumble(0)); // input resumes; stale vibration does not
+    input_resume(); assert(left_x == -24000 && !rumble(0) && motion_on); // input resumes; stale vibration does not
     // No Apple observers were installed: even an Apple connection notification cannot take over SDL's input/haptics route.
     [NSNotificationCenter.defaultCenter postNotificationName:GCControllerDidConnectNotification object:nil];
     assert(!apple_init && !apple_routes);
-    sdl_shutdown(); assert(!g_sdl_pad && !g_sdl_timer && !players && !left_x && !dm_haptics_available());
+    sdl_shutdown(); assert(!g_sdl_pad && !g_sdl_timer && !players && !left_x && !dm_haptics_available() && !motion_on);
     dlclose(lib);
     puts("Mac composition root: SDL-only ownership, input delivery, focus and haptics passed"); return 0;
 } }

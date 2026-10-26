@@ -27,11 +27,16 @@ SDL2 2.0.18 or newer is loaded at runtime, only when selected; neither building 
 
 Only the selected backend publishes physical input, preventing duplicate devices/presses. SDL uses the same positional face buttons, both sticks, shoulders, triggers, player-slot rules and `DM_KBD_PLAYER=own` as the default path. `DM_PAD_MERGE=1` ORs the controllers' buttons and takes the most-deflected axis for player 1. Changes are polled at 120 Hz; losing focus releases held input and stops rumble, and focus regain samples held controls again. Unchanged polls do not overwrite the `DM_KEYS`/`DM_CTL` path. SDL's ordinary two-motor rumble approximates each Switch handle's combined bands; `DM_RUMBLE` and `DM_RUMBLE_GAIN` still apply, but exact HD-rumble waveforms are not reproduced.
 
+With `DM_PAD_BACKEND=sdl`, capable controllers also supply physical six-axis motion: accelerometer and gyroscope are enabled together, independently of button events. The host converts units/axes and integrates rotation into the game's six-axis history; focus loss and disconnect clear it. This is gyro-integrated orientation, not gravity-fused orientation; long-session drift and each controller's game aiming direction/sensitivity need hardware testing. `DM_MOTION_LOG=1` logs the six-axis values actually returned to the game, at most once per guest second. The default Apple backend and iOS remain unchanged. See [Physical controller motion on the Mac](reference/services.md#physical-controller-motion-on-the-mac).
+
 Check a controller without game files:
 
 ```sh
 python3 scripts/check_mac_controller.py --seconds 30
+python3 scripts/check_mac_controller.py --motion --seconds 20
 ```
+
+`--motion` checks sensor availability and a measured rotation exceeding 0.05 revolutions/s (exit 0); absent sensors or insufficient movement is inconclusive (exit 2), not a gameplay pass. Rotate the controller during that capture.
 
 Connect only the controller being tested, then circle both sticks and press the buttons during the capture. The check compares the production SDL backend with GameController and prints each axis's peak. Exit 0 means both sticks exceeded 0.5, 1 means only one did, and 2 means no controller/motion, multiple controllers, or an unavailable backend. These are input measurements, not an in-game test. Automated loader/mapping/focus/hotplug/slot/rumble checks need neither SDL nor hardware: `make -C dm/host/tests pad-sdl`; `make -C dm/host/tests GAME=<id> pad-sdl-front` also exercises the actual Mac composition root (both are part of `run`). With SDL2 installed and physical controllers disconnected, `make -C dm/host/tests pad-sdl-live` checks the real library's ABI and mapping using an SDL virtual controller.
 

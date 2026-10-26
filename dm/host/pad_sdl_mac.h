@@ -10,6 +10,7 @@ typedef struct {
     void (*state)(void *context, int player, uint64_t buttons, int32_t lx, int32_t ly, int32_t rx, int32_t ry);
     void (*players)(void *context, uint32_t mask);
     void (*rumble_route)(void *context, int player, int available);
+    void (*motion)(void *context, int player, const dm_motion *sample);
 } dm_sdl_pad_sink;
 
 // library: explicit dylib path, or NULL for the Homebrew/system search. Failure leaves no SDL subsystem or input route behind.

@@ -121,6 +121,7 @@ static float g_sdl_gain = 1;
 static void sdl_state(void *ctx, int p, uint64_t b, int32_t lx, int32_t ly, int32_t rx, int32_t ry) {
     (void)ctx; dm_pad_set_player(p, b, lx, ly, rx, ry);
 }
+static void sdl_motion(void *ctx, int p, const dm_motion *m) { (void)ctx; dm_pad_motion(p, m); }
 static void sdl_players(void *ctx, uint32_t mask) { (void)ctx; dm_pad_players(mask); }
 static void sdl_route(void *ctx, int p, int on) { (void)ctx; dm_haptics_route(p, on); }
 // The haptics core already stores the latest snapshot under its lock. Poll it on the AppKit thread; never call SDL from a guest thread.
@@ -206,7 +207,7 @@ static void pads_start(void) {
     e = getenv("DM_PAD_BACKEND");
     if (e && !strcmp(e, "sdl")) {
         char error[512];
-        g_sdl_pad = dm_sdl_pad_create((dm_sdl_pad_sink){NULL, sdl_state, sdl_players, sdl_route}, g_merge, g_kbd_own, getenv("DM_SDL_LIBRARY"), error, sizeof error);
+        g_sdl_pad = dm_sdl_pad_create((dm_sdl_pad_sink){NULL, sdl_state, sdl_players, sdl_route, sdl_motion}, g_merge, g_kbd_own, getenv("DM_SDL_LIBRARY"), error, sizeof error);
         if (g_sdl_pad) {
             e = getenv("DM_RUMBLE"); dm_haptics_init(sdl_haptics_changed, !e || atoi(e) != 0);
             e = getenv("DM_RUMBLE_GAIN"); if (e) { float v = strtof(e, NULL); if (isfinite(v)) g_sdl_gain = fmaxf(0, fminf(3, v)); }

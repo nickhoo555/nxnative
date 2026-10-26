@@ -6,6 +6,7 @@
 #include <dlfcn.h>
 #include <stdlib.h>
 #include <time.h>
+#include <math.h>
 
 typedef struct _SDL_GameController SDL_GameController;
 enum { SDL_INIT_GAMECONTROLLER = 0x2000, SDL_HINT_OVERRIDE = 2 };
@@ -32,6 +33,9 @@ enum { BUTTON_A, BUTTON_B, BUTTON_X, BUTTON_Y, BUTTON_BACK, BUTTON_GUIDE, BUTTON
     F(void, GameControllerUpdate, (void)) \
     F(int, GameControllerEventState, (int)) \
     F(int, JoystickEventState, (int)) \
+    F(int, GameControllerHasSensor, (SDL_GameController *, int)) \
+    F(int, GameControllerSetSensorEnabled, (SDL_GameController *, int, int)) \
+    F(int, GameControllerGetSensorData, (SDL_GameController *, int, float *, int)) \
     F(int, GameControllerHasRumble, (SDL_GameController *)) \
     F(int, GameControllerRumble, (SDL_GameController *, uint16_t, uint16_t, uint32_t))
 typedef struct {
@@ -43,7 +47,7 @@ typedef struct { uint64_t buttons; int32_t lx, ly, rx, ry; } pad_state;
 typedef struct {
     SDL_GameController *controller;
     int32_t id;
-    int player, rumble;
+    int player, rumble, motion;
     uint16_t low, high;
     uint64_t rumble_time, rumble_retry;
 } pad_device;
@@ -54,7 +58,8 @@ struct dm_sdl_pad {
     pad_slots slots;
     pad_device devices[DM_PLAYERS];
     pad_state published[DM_PLAYERS];
-    uint32_t physical, players;
+    uint32_t physical, players, motion_players;
+    int32_t motion_owner[DM_PLAYERS];
     int merge, active, keyboard, rumble_errors;
 };
 
@@ -158,6 +163,13 @@ void dm_sdl_pad_poll(dm_sdl_pad *p, int active) {
         int slot = pad_slot_take(&p->slots, d, name);
         if (slot < 0) { p->api.GameControllerClose(d->controller); d->controller = NULL; continue; }
         d->id = id; d->player = p->merge ? 0 : slot; d->rumble = p->api.GameControllerHasRumble(d->controller);
+        if (p->sink.motion && p->api.GameControllerHasSensor(d->controller, 1) && p->api.GameControllerHasSensor(d->controller, 2)) {
+            int acc = p->api.GameControllerSetSensorEnabled(d->controller, 1, 1);
+            int gyro = p->api.GameControllerSetSensorEnabled(d->controller, 2, 1);
+            d->motion = acc == 0 && gyro == 0;
+            if (!d->motion) fprintf(stderr, "[RED] SDL motion enable: %s\n", p->api.GetError());
+        }
+        fprintf(stderr, "SDL controller '%s': six-axis motion %s\n", name ? name : "?", d->motion ? "enabled" : "unavailable");
         if (!p->merge) route(p, d->player, d->rumble);
         fprintf(stderr, "SDL controller '%s' connected: player %d\n", name ? name : "?", d->player + 1); topology = 1;
     }
@@ -167,6 +179,29 @@ void dm_sdl_pad_poll(dm_sdl_pad *p, int active) {
         physical |= 1u << d->player; rumble |= d->rumble;
         if (active) combine(&states[d->player], read_pad(p, d));
     }
+    // Motion is one rigid body, not a sum of controllers. In merge mode choose the first capable device.
+    uint32_t motion_players = 0;
+    for (int i = 0; active && i < DM_PLAYERS; i++) {
+        pad_device *d = &p->devices[i];
+        if (!d->controller || !d->motion || (motion_players >> d->player & 1)) continue;
+        float a[3], g[3];
+        if (p->api.GameControllerGetSensorData(d->controller, 1, a, 3) < 0 ||
+            p->api.GameControllerGetSensorData(d->controller, 2, g, 3) < 0) continue;
+        int valid = 1; for (int j = 0; j < 3; j++) valid &= isfinite(a[j]) && isfinite(g[j]);
+        if (!valid) continue;
+        // SDL: X right, Y up, Z toward the player, m/s^2 and rad/s (SDL_sensor.h).
+        // Switch: X right, Y forward, Z up; acceleration includes gravity toward earth.
+        const float gravity = 9.80665f, turn = 6.28318530718f;
+        dm_motion m = {{-a[0] / gravity, a[2] / gravity, -a[1] / gravity},
+                       {g[0] / turn, -g[2] / turn, g[1] / turn}};
+        if ((p->motion_players >> d->player & 1) && p->motion_owner[d->player] != d->id)
+            p->sink.motion(p->sink.context, d->player, NULL); // a different rigid body starts a new orientation reference
+        p->motion_owner[d->player] = d->id;
+        p->sink.motion(p->sink.context, d->player, &m); motion_players |= 1u << d->player;
+    }
+    if (p->sink.motion) for (int player = 0; player < DM_PLAYERS; player++)
+        if ((p->motion_players & ~motion_players) >> player & 1) p->sink.motion(p->sink.context, player, NULL);
+    p->motion_players = motion_players;
     if (p->merge && topology) route(p, 0, rumble);
     uint32_t players = physical | (p->keyboard ? 1u : 0);
     if (players != p->players) { p->players = players; p->sink.players(p->sink.context, players); }
@@ -202,6 +237,8 @@ void dm_sdl_pad_destroy(dm_sdl_pad *p) {
     if (!p) return;
     for (int i = 0; i < DM_PLAYERS; i++) if (p->devices[i].controller) close_pad(p, &p->devices[i]);
     for (int player = 0; player < DM_PLAYERS; player++) if (p->physical >> player & 1) publish(p, player, (pad_state){0});
+    if (p->sink.motion) for (int player = 0; player < DM_PLAYERS; player++)
+        if (p->motion_players >> player & 1) p->sink.motion(p->sink.context, player, NULL);
     if (p->merge) route(p, 0, 0);
     if (p->players) p->sink.players(p->sink.context, 0);
     p->api.QuitSubSystem(SDL_INIT_GAMECONTROLLER); dlclose(p->library); free(p);

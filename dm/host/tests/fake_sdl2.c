@@ -3,7 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-typedef struct { int connected, id; char name[64]; int16_t axes[6]; uint8_t buttons[15]; int rumble; uint16_t low, high; } FakePad;
+typedef struct { int connected, id; char name[64]; int16_t axes[6]; uint8_t buttons[15]; int rumble; uint16_t low, high; int sensors, enabled, sensor_error; float acc[3], gyro[3]; } FakePad;
 static FakePad pads[12];
 static int initialized, fail_init, open_count, close_count, updates, position_hint, mfi_hint, switch_hint;
 void fake_reset(void) { memset(pads, 0, sizeof pads); initialized = fail_init = open_count = close_count = updates = position_hint = mfi_hint = switch_hint = 0; }
@@ -47,3 +47,12 @@ int SDL_GameControllerEventState(int state) { return state; }
 int SDL_JoystickEventState(int state) { return state; }
 int SDL_GameControllerHasRumble(FakePad *pad) { return pad->rumble; }
 int SDL_GameControllerRumble(FakePad *pad, uint16_t low, uint16_t high, uint32_t ms) { (void)ms; pad->low = low; pad->high = high; return 0; }
+
+void fake_sensor_error(int i, int on) { pads[i].sensor_error = on; }
+void fake_motion(int i, const float *acc, const float *gyro) { pads[i].sensors = 1; memcpy(pads[i].acc, acc, 12); memcpy(pads[i].gyro, gyro, 12); }
+int SDL_GameControllerHasSensor(FakePad *p, int type) { return p->sensors && (type == 1 || type == 2); }
+int SDL_GameControllerSetSensorEnabled(FakePad *p, int type, int on) { if (on) p->enabled |= 1 << type; else p->enabled &= ~(1 << type); return 0; }
+int SDL_GameControllerGetSensorData(FakePad *p, int type, float *out, int n) {
+    if (p->sensor_error || !p->connected || !(p->enabled & (1 << type)) || n != 3) return -1;
+    memcpy(out, type == 1 ? p->acc : p->gyro, 12); return 0;
+}

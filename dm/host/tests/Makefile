@@ -96,10 +96,10 @@ $(B)/t_pctl: t_pctl.c ../hle_misc.c ../hle.h ../dm.h $(GAME_H) | $(B)
 	clang -O1 -Wall -Werror -Wno-unused-function -I.. $(GINC) -o $@ t_pctl.c
 $(B)/t_shared_font: t_shared_font.c ../hle_sdk16.c ../hle.h ../dm.h $(GAME_H) | $(B)
 	clang -O1 -Wall -Werror -Wno-unused-function -Wno-frame-address -I.. $(GINC) -o $@ t_shared_font.c
-$(B)/t_hid: t_hid.c ../hle_hid.c ../hle_haptics.c ../hle_haptics.h ../pad_slots.h ../dm_input.h ../hle.h ../dm.h $(GAME_H) | $(B)
-	clang -O1 -Wall -Werror -Wno-unused-function -I.. $(GINC) -o $@ t_hid.c ../hle_haptics.c
-$(B)/t_hid_tsan: t_hid.c ../hle_hid.c ../hle_haptics.c ../hle_haptics.h ../pad_slots.h ../dm_input.h ../hle.h ../dm.h $(GAME_H) | $(B)
-	clang -O1 -g -fsanitize=thread -Wall -Werror -Wno-unused-function -I.. $(GINC) -o $@ t_hid.c ../hle_haptics.c
+$(B)/t_hid: t_hid.c ../pad_sdl_mac.c ../pad_sdl_mac.h ../hle_hid.c ../hle_haptics.c ../hle_haptics.h ../pad_slots.h ../dm_input.h ../hle.h ../dm.h $(GAME_H) | $(B)
+	clang -O1 -Wall -Werror -Wno-unused-function -I.. $(GINC) -o $@ t_hid.c ../hle_haptics.c ../pad_sdl_mac.c
+$(B)/t_hid_tsan: t_hid.c ../pad_sdl_mac.c ../pad_sdl_mac.h ../hle_hid.c ../hle_haptics.c ../hle_haptics.h ../pad_slots.h ../dm_input.h ../hle.h ../dm.h $(GAME_H) | $(B)
+	clang -O1 -g -fsanitize=thread -Wall -Werror -Wno-unused-function -I.. $(GINC) -o $@ t_hid.c ../hle_haptics.c ../pad_sdl_mac.c
 $(B)/t_haptics: t_haptics.c ../hle_haptics.c ../hle_haptics.h ../dm_input.h | $(B)
 	clang -O1 -g -Wall -Werror -I.. -o $@ t_haptics.c ../hle_haptics.c
 $(B)/t_haptics_apple: t_haptics_apple.m ../haptics_apple.m ../haptics_apple.h ../hle_haptics.c ../hle_haptics.h | $(B)
@@ -197,3 +197,8 @@ pad-sdl-live: $(B)/t_pad_sdl_live
 	$(B)/t_pad_sdl_live
 $(B)/t_pad_sdl_live: t_pad_sdl_live.c ../pad_sdl_mac.c ../pad_sdl_mac.h ../pad_slots.h ../dm_input.h | $(B)
 	clang -O1 -g -Wall -Wextra -Werror $$(sdl2-config --cflags) -o $@ t_pad_sdl_live.c ../pad_sdl_mac.c $$(sdl2-config --libs)
+
+.PHONY: motion
+run: motion
+motion: $(B)/t_hid $(B)/fake_sdl2.dylib
+	$(B)/t_hid $(abspath $(B)/fake_sdl2.dylib)

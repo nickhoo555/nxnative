@@ -11,6 +11,7 @@ import tempfile
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--seconds', type=int, default=30, help='capture duration, 1..300 seconds (default: 30)')
+    parser.add_argument('--motion', action='store_true', help='check real gyroscope input instead of both sticks')
     args = parser.parse_args()
     if sys.platform != 'darwin':
         parser.error('this check requires macOS')
@@ -23,7 +24,7 @@ def main():
                         str(host / 'tests' / 'probe_pad_mac.m'), str(host / 'pad_sdl_mac.c'),
                         '-framework', 'Foundation', '-framework', 'GameController', '-o', binary], check=True)
         # SDL touches device state as any controller driver does; it does not write calibration or firmware.
-        return subprocess.run([binary, str(args.seconds)], env=os.environ).returncode
+        return subprocess.run([binary, str(args.seconds)] + (['motion'] if args.motion else []), env=os.environ).returncode
 
 
 if __name__ == '__main__':
