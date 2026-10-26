@@ -72,6 +72,8 @@ Game-specific findings. The general host changes they led to are listed under [F
 
 ## Found on this game
 
+- **Host regression fixed; device shrine-exit verification pending:** [Sparse sampled textures read on a game worker](../../../docs/reference/nvn-objects.md#sparse-sampled-textures-read-on-a-game-worker). The reported `bake::ModuleMgr` abort and the API-level reproducer share the `ReadTexels` → upload-owner assertion; this is not a new gameplay pass claim.
+
 General host changes first needed here; each applies to every game:
 
 - **Resolved in the host: frame-step recovery after a 30 fps movie cap**: [The frame step after a 30 fps cap ends](../../../docs/reference/frame-rate.md#the-frame-step-after-a-30-fps-cap-ends). Modelled with the movie flag; no new gameplay recovery observation is claimed.
@@ -89,6 +91,8 @@ General host changes first needed here; each applies to every game:
 - **Slotted command lists** (`OP_RESERVE`, `t_nvn` "slotted lists"): [Prerecorded lists in slots of their measured size](../../../docs/reference/nvn-objects.md#prerecorded-lists-in-slots-of-their-measured-size).
 
 ## Open
+
+- First-shrine exit on iPad: validate the worker-readback candidate on the original route. The captured run aborted with `SIGABRT` and about 2.4 GB headroom, unlike the separate earlier `memory-highwater` termination. The shrine-area saves were backed up before any replacement build; do not overwrite or switch a player's active save for validation.
 
 - Texture layout: NVN's automatic block height now truncates for every game (`pick_tile(ah * 3 / 16)`). That changes layouts at 6–10, 17–21, 38–42 and 81–85 block rows, which matters for this game's flushed textures. Not re-checked here.
 - `game.tsv` still describes the game as "In bring-up", and some memory values as "Breath of the Wild's", not measured for this game.
