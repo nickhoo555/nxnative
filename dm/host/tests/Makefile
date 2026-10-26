@@ -161,3 +161,39 @@ memory-dirty: $(B)/t_svc_memory_dirty
 memory-profile: $(B)/t_svc_memory
 	$(PYTHON) test_memory_profile.py
 run: memory memory-dirty memory-profile
+
+run: pad-sdl
+.PHONY: pad-sdl
+pad-sdl: $(B)/t_pad_sdl $(B)/fake_sdl2.dylib $(B)/fake_sdl2_incomplete.dylib
+	$(B)/t_pad_sdl $(abspath $(B)/fake_sdl2.dylib) $(abspath $(B)/fake_sdl2_incomplete.dylib)
+run: pad-sdl-front
+.PHONY: pad-sdl-front
+pad-sdl-front: $(B)/t_front_pad_mac $(B)/fake_sdl2.dylib
+	$(B)/t_front_pad_mac $(abspath $(B)/fake_sdl2.dylib) sdl
+	$(B)/t_front_pad_mac /no/such/SDL2.dylib fallback
+	$(B)/t_front_pad_mac /no/such/SDL2.dylib apple
+$(B)/t_front_pad_mac: t_front_pad_mac.m ../front_mac.m ../pad_sdl_mac.c ../pad_sdl_mac.h ../hle_haptics.c ../hle_haptics.h $(GAME_H) | $(B)
+	clang -O1 -g -Wall -Werror -Wno-unused-function -Wno-unused-but-set-variable $(GINC) -fobjc-arc -o $@ t_front_pad_mac.m ../pad_sdl_mac.c ../hle_haptics.c -framework Cocoa -framework QuartzCore -framework Metal -framework GameController
+$(B)/t_pad_sdl: t_pad_sdl.c ../pad_sdl_mac.c ../pad_sdl_mac.h ../pad_slots.h ../dm_input.h | $(B)
+	clang -O1 -g -Wall -Wextra -Werror -o $@ t_pad_sdl.c ../pad_sdl_mac.c
+$(B)/fake_sdl2.dylib: fake_sdl2.c | $(B)
+	clang -Wall -Wextra -Werror -dynamiclib -o $@ $<
+$(B)/fake_sdl2_incomplete.dylib: fake_sdl2.c | $(B)
+	clang -Wall -Wextra -Werror -DOMIT_AXIS -dynamiclib -o $@ $<
+
+# Probe verdicts must use the captured player mask, not the zero mask emitted during backend shutdown.
+run: pad-sdl-probe
+.PHONY: pad-sdl-probe
+pad-sdl-probe: $(B)/probe_pad_mac $(B)/fake_sdl2.dylib
+	DM_SDL_LIBRARY=$(abspath $(B)/fake_sdl2.dylib) DM_TEST_SDL_INPUT=both $(B)/probe_pad_mac 1
+	@DM_SDL_LIBRARY=$(abspath $(B)/fake_sdl2.dylib) DM_TEST_SDL_INPUT=left $(B)/probe_pad_mac 1; result=$$?; test $$result = 1
+	@DM_SDL_LIBRARY=$(abspath $(B)/fake_sdl2.dylib) $(B)/probe_pad_mac 1; result=$$?; test $$result = 2
+$(B)/probe_pad_mac: probe_pad_mac.m ../pad_sdl_mac.c ../pad_sdl_mac.h ../pad_slots.h ../dm_input.h | $(B)
+	clang -O1 -g -Wall -Wextra -Werror -fobjc-arc -o $@ probe_pad_mac.m ../pad_sdl_mac.c -framework Foundation -framework GameController
+
+# Optional real-library check. Not part of run/CI: requires SDL2 installed, but uses a virtual controller and no game/hardware.
+.PHONY: pad-sdl-live
+pad-sdl-live: $(B)/t_pad_sdl_live
+	$(B)/t_pad_sdl_live
+$(B)/t_pad_sdl_live: t_pad_sdl_live.c ../pad_sdl_mac.c ../pad_sdl_mac.h ../pad_slots.h ../dm_input.h | $(B)
+	clang -O1 -g -Wall -Wextra -Werror $$(sdl2-config --cflags) -o $@ t_pad_sdl_live.c ../pad_sdl_mac.c $$(sdl2-config --libs)

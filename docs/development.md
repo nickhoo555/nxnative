@@ -14,6 +14,29 @@ The README covers packing and playing. This page is for working on nxnative itse
 | iOS app | One unsigned IPA for iPhone and iPad. The rewritten code is embedded in the executable; the shader libraries, the RomFS and the game icon are inside the app. A settings screen comes before the game (`Launcher.swift`, drawn from `dm/launcher.json`, which `dm/games/settings.py` writes from `dm/games/settings.tsv`); the host's loading starts at app launch meanwhile, and the frame rate and render scale go into the frame step state when the game starts (`loader.c` `dm_fps_state_apply`) |
 | Known gaps | Conditional render is always drawn; `MultiDraw*IndirectCount` waits on the CPU for the GPU-written count; geometry shaders do not translate. TBDR optimizations are off by default (they don't understand bindless textures yet). No amiibo. The bundled prewarm lists are empty. On the Mac, Mario's menu and dialogue text render blank (fine on the iPhone) |
 
+## Mac controller compatibility
+
+The Mac defaults to Apple's GameController framework (`DM_PAD_BACKEND=apple`). Some third-party Switch-mode controllers, including the S820 tested here, send valid left-stick HID reports while GameController returns `(0, 0)`. The optional SDL2 backend uses SDL's Switch HIDAPI driver instead, as Cemu does:
+
+```sh
+brew install sdl2
+DM_PAD_BACKEND=sdl DM_WINDOW=1 <the usual Mac host command and game arguments>
+```
+
+SDL2 2.0.18 or newer is loaded at runtime, only when selected; neither building nxnative nor the default backend requires SDL. The loader tries Homebrew's `/opt/homebrew/lib/libSDL2.dylib`, `/usr/local/lib/libSDL2.dylib`, then `libSDL2.dylib`. `DM_SDL_LIBRARY=/absolute/path/to/libSDL2.dylib` overrides this search (the library must match the host's architecture). A missing/incompatible library logs a `[RED]` diagnostic and falls back to GameController. SDL initializes only its controller subsystem, not its video/window backend; AppKit retains the event loop.
+
+Only the selected backend publishes physical input, preventing duplicate devices/presses. SDL uses the same positional face buttons, both sticks, shoulders, triggers, player-slot rules and `DM_KBD_PLAYER=own` as the default path. `DM_PAD_MERGE=1` ORs the controllers' buttons and takes the most-deflected axis for player 1. Changes are polled at 120 Hz; losing focus releases held input and stops rumble, and focus regain samples held controls again. Unchanged polls do not overwrite the `DM_KEYS`/`DM_CTL` path. SDL's ordinary two-motor rumble approximates each Switch handle's combined bands; `DM_RUMBLE` and `DM_RUMBLE_GAIN` still apply, but exact HD-rumble waveforms are not reproduced.
+
+Check a controller without game files:
+
+```sh
+python3 scripts/check_mac_controller.py --seconds 30
+```
+
+Connect only the controller being tested, then circle both sticks and press the buttons during the capture. The check compares the production SDL backend with GameController and prints each axis's peak. Exit 0 means both sticks exceeded 0.5, 1 means only one did, and 2 means no controller/motion, multiple controllers, or an unavailable backend. These are input measurements, not an in-game test. Automated loader/mapping/focus/hotplug/slot/rumble checks need neither SDL nor hardware: `make -C dm/host/tests pad-sdl`; `make -C dm/host/tests GAME=<id> pad-sdl-front` also exercises the actual Mac composition root (both are part of `run`). With SDL2 installed and physical controllers disconnected, `make -C dm/host/tests pad-sdl-live` checks the real library's ABI and mapping using an SDL virtual controller.
+
+This is a **Mac-only** workaround. The `_mac` source stays out of iOS builds. SDL's normal iOS controller path also uses GameController; adding this backend does not fix the S820's iPad behavior.
+
 ## Guest memory SVCs
 
 `dm/host/hle_svc.c` serializes heap resizing, physical map/unmap, stack

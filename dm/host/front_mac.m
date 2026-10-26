@@ -14,6 +14,7 @@
 #include "front.h"
 #include "hle.h"
 #include "pad_slots.h"
+#include "pad_sdl_mac.h"
 #include "haptics_apple.h"
 #include <signal.h>
 #include <math.h>
@@ -114,6 +115,28 @@ static void on_key(NSEvent *e, int down) {
 static pad_slots g_slots;
 static GCController *g_held[DM_PLAYERS];   // the controller of each slot, kept alive while it holds it (the slot table keys on its pointer)
 static int g_merge, g_kbd_own;
+static dm_sdl_pad *g_sdl_pad;
+static NSTimer *g_sdl_timer;
+static float g_sdl_gain = 1;
+static void sdl_state(void *ctx, int p, uint64_t b, int32_t lx, int32_t ly, int32_t rx, int32_t ry) {
+    (void)ctx; dm_pad_set_player(p, b, lx, ly, rx, ry);
+}
+static void sdl_players(void *ctx, uint32_t mask) { (void)ctx; dm_pad_players(mask); }
+static void sdl_route(void *ctx, int p, int on) { (void)ctx; dm_haptics_route(p, on); }
+// The haptics core already stores the latest snapshot under its lock. Poll it on the AppKit thread; never call SDL from a guest thread.
+static void sdl_haptics_changed(dm_haptic_state s) { (void)s; }
+static void sdl_tick(void) {
+    dm_sdl_pad_poll(g_sdl_pad, g_input_on);
+    for (int p = 0; p < DM_PLAYERS; p++) {
+        dm_vibration left = dm_haptics_actual(p, 0), right = dm_haptics_actual(p, 1);
+        dm_haptic_level lo = dm_haptics_level(&left, 1, g_sdl_gain), hi = dm_haptics_level(&right, 1, g_sdl_gain);
+        dm_sdl_pad_rumble(g_sdl_pad, p, (uint16_t)(lo.intensity * 65535), (uint16_t)(hi.intensity * 65535));
+    }
+}
+static void sdl_shutdown(void) {
+    [g_sdl_timer invalidate]; g_sdl_timer = nil;
+    dm_sdl_pad_destroy(g_sdl_pad); g_sdl_pad = NULL;
+}
 static int32_t pad_axis(float v) { return (int32_t)(fmaxf(-1.f, fminf(1.f, v)) * DM_STICK_MAX); }
 static void pad_read(GCExtendedGamepad *g) {
     if (!g_input_on) return;
@@ -167,17 +190,41 @@ static void input_release(void) {
     g_input_on = 0;
     g_btn = 0; g_w = g_a = g_s = g_d = 0; push();
     if (g_mouse_down) { g_mouse_down = 0; dm_touch_set(NULL, 0); }
+    if (g_sdl_pad) { dm_haptics_suspend(DM_HAPTICS_INACTIVE, 1); sdl_tick(); return; }
     if (g_merge) { for (GCController *c in GCController.controllers) if (c.extendedGamepad) { dm_pad_set(0, 0, 0, 0, 0); break; } }
     else for (int p = 0; p < DM_PLAYERS; p++) if (g_held[p]) dm_pad_set_player(p, 0, 0, 0, 0, 0);
 }
 static void input_resume(void) {
     g_input_on = 1;
+    if (g_sdl_pad) { dm_haptics_suspend(DM_HAPTICS_INACTIVE, 0); sdl_tick(); return; }
     if (g_merge) { for (GCController *c in GCController.controllers) if (c.extendedGamepad) pad_read(c.extendedGamepad); }
     else for (int p = 0; p < DM_PLAYERS; p++) if (g_held[p].extendedGamepad) pad_read(g_held[p].extendedGamepad);
 }
 static void pads_start(void) {
     const char *e = getenv("DM_PAD_MERGE"); g_merge = e && atoi(e);
     e = getenv("DM_KBD_PLAYER"); g_kbd_own = !g_merge && e && !strcmp(e, "own");
+    e = getenv("DM_PAD_BACKEND");
+    if (e && !strcmp(e, "sdl")) {
+        char error[512];
+        g_sdl_pad = dm_sdl_pad_create((dm_sdl_pad_sink){NULL, sdl_state, sdl_players, sdl_route}, g_merge, g_kbd_own, getenv("DM_SDL_LIBRARY"), error, sizeof error);
+        if (g_sdl_pad) {
+            e = getenv("DM_RUMBLE"); dm_haptics_init(sdl_haptics_changed, !e || atoi(e) != 0);
+            e = getenv("DM_RUMBLE_GAIN"); if (e) { float v = strtof(e, NULL); if (isfinite(v)) g_sdl_gain = fmaxf(0, fminf(3, v)); }
+            LOG("front end: SDL2 controller backend (raw HID, buttons by position)%s", g_merge ? "; every controller is player 1" : g_kbd_own ? "; keyboard owns player 1" : "");
+            sdl_tick();
+            g_sdl_timer = [NSTimer timerWithTimeInterval:1.0 / 120 repeats:YES block:^(NSTimer *t) { (void)t; sdl_tick(); }];
+            [NSRunLoop.mainRunLoop addTimer:g_sdl_timer forMode:NSRunLoopCommonModes];
+            [NSNotificationCenter.defaultCenter addObserverForName:NSApplicationWillTerminateNotification object:nil queue:NSOperationQueue.mainQueue usingBlock:^(NSNotification *n) { (void)n; sdl_shutdown(); }];
+            return; // one selected input/haptics owner; do not subscribe to GameController too
+        }
+        LOG("[RED] SDL controller backend unavailable: %s; using GameController (brew install sdl2, or set DM_SDL_LIBRARY)", error);
+    } else if (e && strcmp(e, "apple")) LOG("[RED] unknown DM_PAD_BACKEND '%s'; using GameController", e);
+    dm_haptics_apple_init();
+    for (NSNotificationName nm in @[GCControllerDidConnectNotification, GCControllerDidDisconnectNotification])
+        [NSNotificationCenter.defaultCenter addObserverForName:nm object:nil queue:NSOperationQueue.mainQueue usingBlock:^(NSNotification *n) {
+            GCController *c = n.object; int conn = n.name == GCControllerDidConnectNotification;
+            if (!c.extendedGamepad || g_merge) LOG("controller %s: %s%s", conn ? "connected" : "disconnected", pad_name(c), c.extendedGamepad ? "" : " (no extended gamepad profile: not used)");
+            pads_changed(conn ? nil : c); }];
     static const char kbd = 0;
     if (g_kbd_own) pad_slot_take(&g_slots, &kbd, "keyboard");   // holds player 1 for good
     LOG("front end: %s", g_merge ? "every controller is player 1 (DM_PAD_MERGE)" : g_kbd_own ? "the keyboard is player 1, each controller a player of its own from player 2 on (DM_KBD_PLAYER=own)"
@@ -258,12 +305,6 @@ void front_run(void (*guest)(void)) {
         [wm addItemWithTitle:@"Enter Full Screen" action:@selector(toggleFullScreen:) keyEquivalent:@"f"].keyEquivalentModifierMask = NSEventModifierFlagControl | NSEventModifierFlagCommand;
         NSApp.mainMenu = bar;
         if (getenv("DM_FULLSCREEN")) dispatch_async(dispatch_get_main_queue(), ^{ [win toggleFullScreen:nil]; });   // start in fullscreen
-        for (NSNotificationName nm in @[GCControllerDidConnectNotification, GCControllerDidDisconnectNotification])
-            [NSNotificationCenter.defaultCenter addObserverForName:nm object:nil queue:NSOperationQueue.mainQueue usingBlock:^(NSNotification *n) {
-                GCController *c = n.object; int conn = n.name == GCControllerDidConnectNotification;
-                if (!c.extendedGamepad || g_merge) LOG("controller %s: %s%s", conn ? "connected" : "disconnected", pad_name(c), c.extendedGamepad ? "" : " (no extended gamepad profile: not used)");
-                pads_changed(conn ? nil : c); }];
-        dm_haptics_apple_init();
         pads_start();
         [NSEvent addLocalMonitorForEventsMatchingMask:NSEventMaskKeyDown | NSEventMaskKeyUp handler:^NSEvent *(NSEvent *e) {
             if (e.window != win) return e;   // Only swallow keys for the game window; other windows such as the software keyboard input box receive typing as usual
@@ -272,7 +313,7 @@ void front_run(void (*guest)(void)) {
             return nil;   // Swallow it to avoid the system beep
         }];
         [[NSNotificationCenter defaultCenter] addObserverForName:NSWindowWillCloseNotification object:win queue:nil
-                                                      usingBlock:^(NSNotification *n) { (void)n; exit(0); }];
+                                                      usingBlock:^(NSNotification *n) { (void)n; sdl_shutdown(); exit(0); }];
         // Lifecycle (hle.h / dm.h): focus lost → 2, focus regained → 1; minimized → 3 + audio paused + GPU suspended, restored → resume (followed by focus regained → 1).
         // Input is released when the window stops being key (and when it is minimized) and taken up again when it is key again
         NSNotificationCenter *nc = NSNotificationCenter.defaultCenter;
