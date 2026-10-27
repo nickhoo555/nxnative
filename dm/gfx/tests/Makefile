@@ -98,6 +98,13 @@ t_readback: t_readback.m $(MTL_T_DEP)
 check_t_readback: t_readback
 	MTL_DEBUG_LAYER=1 ./t_readback
 run: check_t_readback
+t_worker_readback: t_worker_readback.m $(MTL_T_DEP)
+	clang $(CFLAGS) -fobjc-arc -o $@ t_worker_readback.m $(filter-out ../nvn/hle_nvn.c,$(MTL_T_SRC)) $(FW)
+.PHONY: check_t_worker_readback
+check_t_worker_readback: t_worker_readback
+	DM_NVN_ENC_THREAD=0 MTL_DEBUG_LAYER=1 ./t_worker_readback
+	DM_NVN_ENC_THREAD=1 MTL_DEBUG_LAYER=1 ./t_worker_readback
+run: check_t_worker_readback
 t_present_crop: t_present_crop.m ../nvn/hle_nvn.c ../../host/crash.c ../../host/hle_bigstack.c t_host_stubs.c $(GFX) $(GFX_H)
 	clang $(CFLAGS) -fobjc-arc -o $@ t_present_crop.m ../../host/crash.c ../../host/hle_bigstack.c t_host_stubs.c $(filter-out ../nvn/nvn_mtl.m,$(GFX)) $(FW)
 t_present_rescue: t_present_rescue.m t_present_rescue_focus.c $(MTL_T_DEP)

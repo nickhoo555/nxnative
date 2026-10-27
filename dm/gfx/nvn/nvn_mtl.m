@@ -2264,14 +2264,18 @@ static void sparse_view(NvPkg *pk, const tex_t *t) {
     pk->vbase = (int)r;
 }
 static uint64_t g_texinfo_ser[8]; static int g_texinfo_n;
+static int tex_sparse_sampled(const tex_t *t) {
+    return t->pool && (t->pool->flags & NVN_MEMORY_POOL_FLAGS_VIRTUAL) && t->d.target != NVN_TEXTURE_TARGET_BUFFER
+        && !(t->d.flags & (NVN_TEXTURE_FLAGS_LINEAR | NVN_TEXTURE_FLAGS_LINEAR_RENDER_TARGET | NVN_TEXTURE_FLAGS_COMPRESSIBLE | NVN_TEXTURE_FLAGS_IMAGE))
+        && nvn_sparse_pool(t->pool);
+}
 static id<MTLTexture> tex_mtl_(const tex_t *ct) {
     tex_t *t = (tex_t *)ct;
     if (!t || !t->serial) return nil;
     if (t->magic != MAGIC('T', 'E', 'X', 0)) { RED_ONCE(70, "texture object no longer valid (magic %#x, first case ser=%llu): no MTLTexture created", t->magic, (unsigned long long)t->serial); return nil; }
     // A sampled texture in a sparse virtual pool holds what the CPU wrote into the physical pages mapped there (Monster Hunter Rise: the hunter's innerwear, ASTC 6x6 with no packaged
     // layout, came out magenta, and the face black): it is read through the page table like a packaged one. Render targets, images, linear and buffer textures stay GPU textures (as ft_add)
-    int packaged = (t->has_layout || tex_cpu_written(t->serial) || (t->pool && (t->pool->flags & NVN_MEMORY_POOL_FLAGS_VIRTUAL) && t->d.target != NVN_TEXTURE_TARGET_BUFFER
-                    && !(t->d.flags & (NVN_TEXTURE_FLAGS_LINEAR | NVN_TEXTURE_FLAGS_LINEAR_RENDER_TARGET | NVN_TEXTURE_FLAGS_COMPRESSIBLE | NVN_TEXTURE_FLAGS_IMAGE)) && nvn_sparse_pool(t->pool))) && t->mem;
+    int packaged = (t->has_layout || tex_cpu_written(t->serial) || tex_sparse_sampled(t)) && t->mem;
     {   // Diagnostic DM_NVN_TEXINFO=WxH: log storage and description of textures of that size on first resolution (to tell whether two textures share storage and why they were not merged)
         static int ti = -1; static uint32_t tw, th; static uint64_t last[64]; static int nl;
         if (ti > 0 && t->d.width == tw && t->d.height == th && g_texinfo_n < 8) { int dup = 0; for (int i = 0; i < g_texinfo_n; i++) dup |= g_texinfo_ser[i] == t->serial; if (!dup && !(t->d.flags & 8)) g_texinfo_ser[g_texinfo_n++] = t->serial; }   // remember the non-render-target ones (no COMPRESSIBLE) for DM_NVN_TEXRAW=info
@@ -8709,7 +8713,29 @@ void mtl_read_texels(const tex_t *t, unsigned level, unsigned layer0, const NVNc
     // textures from the CPU, reads them back with ReadTexels on its own thread before any draw uses them, and copies the blocks into its 5120x5120 roughness atlas. Read from the
     // never-uploaded host texture they were zeros, the atlas stayed empty, and the opening cave's stone blocks got roughness 0 and no torch light
     int nvn_ft_written(const tex_t *);
-    if ((t->has_layout || tex_cpu_written(t->serial) || (DM_GAME_TEX_DIRTY_UPLOAD && nvn_ft_written(t))) && t->mem) {
+    int sparse = tex_sparse_sampled(t);
+    if ((t->has_layout || tex_cpu_written(t->serial) || sparse || (DM_GAME_TEX_DIRTY_UPLOAD && nvn_ft_written(t))) && t->mem) {
+        // Sparse sampled textures have the same guest-memory source of truth as uploads.
+        // Read only the requested block-linear runs through the page table on any caller thread.
+        // Resolving a Metal texture here would enter the submitter's upload batch.
+        if (sparse) {
+            for (int z = 0; z < nz; z++) {
+                uint32_t bytes, rows, slices, gbpb; uint64_t base; unsigned th, td;
+                unsigned layer = is3d ? 0 : layer0 + r->zoffset + z;
+                if (nvn_deswizzle_geom(&t->d, level, layer, &bytes, &rows, &slices, &base, &th, &td, &gbpb)
+                    || r->xoffset < 0 || r->yoffset < 0 || r->zoffset < 0 || x0 + wb > bytes || y0 + hb > rows
+                    || (is3d && (unsigned)(r->zoffset + z) >= slices)) { RED_ONCE(32, "ReadTexels sparse region out of range"); return; }
+                uint32_t pitch = nvn_tex_level_gobs(&t->d, level) * 64;
+                if (pitch < bytes) pitch = bytes;
+                for (size_t y = 0; y < hb; y++) for (size_t x = 0; x < wb;) {
+                    uint32_t bx = (uint32_t)(x0 + x); size_t n = MIN(16 - bx % 16, wb - x);
+                    uint64_t off = base + nvn_bl_offset(bx, (uint32_t)(y0 + y), is3d ? r->zoffset + z : 0, pitch, rows, th, td);
+                    nvn_sparse_copy(t->pool, dst + z * img + y * row + x, (uint64_t)(uintptr_t)t->mem + off, n);
+                    x += n;
+                }
+            }
+            return;
+        }
         uint32_t lw = MAX(t->d.width >> level, 1u), lh = MAX(t->d.height >> level, 1u), lz = is3d ? MAX(t->d.depth >> level, 1u) : 1;
         size_t lp = (size_t)((lw + bw - 1) / bw) * bpb, lr = (lh + bh - 1) / bh;
         uint8_t *lin = malloc(lp * lr * lz);
