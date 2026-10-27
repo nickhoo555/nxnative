@@ -257,6 +257,14 @@ Most service calls can be found before they crash, before the first boot or the 
 - **Check:** every menu, the cards, the map's drag and flick worked by touch with it. `DM_TOUCH_LOG=1` logs each gesture entry, and a `DM_CTL` line `drag <x0> <y0> <x1> <y1> [seconds]` moves a finger for testing pans and swipes on the Mac.
 - **Found on:** [Taiko Risshiden V DX](../../dm/games/0100346017304000/README.md) (SDK 12.3.3, Koei Tecmo's KTGL).
 
+### Mac camera pointer without a raw mouse device
+
+- **Symptom:** the optional Mac keyboard/mouse layout captures the cursor, but an AppKit-only pointer never turns the camera.
+- **Cause:** upstream PR #330 forwards motion exclusively from `GCMouse.mouseInput.mouseMovedHandler`. A pointer can deliver AppKit events without appearing in `GCMouse.mice`; this Mac enumerated zero devices. Clicks and scrolling already use AppKit, so they can work independently of camera motion.
+- **Fix:** the Mac keyboard/mouse input module also monitors relative AppKit moved/dragged events. It forwards them only when no raw `GCMouse` device is present, converts down-positive Y to up-positive, and uses the same capture/focus gates and camera accumulator. This preserves raw counts when available and prevents double delivery. `t_kbm_pointer_mac.m` reproduces the missing route and checks deltas, direction, capture, focus and raw-device exclusion. AppKit pointer acceleration applies to the fallback. A trackpad used alongside an enumerated raw mouse is not covered by this fallback.
+- **Found on:** [Tears of the Kingdom](../../dm/games/0100F2C0115B6000/README.md#keyboard-and-mouse); the route is regression-tested, and the player confirmed physical trackpad camera movement; direction and sensitivity preferences were not separately rated.
+
+
 ### Mouse, keyboard and key code maps
 
 - **Symptom:** the first boot aborted in `hid::GetMouseState` (the SDK's mouse resource was never initialized).
