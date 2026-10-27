@@ -74,6 +74,8 @@ Game-specific findings. The general host changes they led to are listed under [F
 
 - **Resolved on the Mac with the SDL backend:** [Physical controller motion on the Mac](../../../docs/reference/services.md#physical-controller-motion-on-the-mac). A Bluetooth Mingpin S820 in Switch mode returned 2,084 physical samples over 20 s (peak 1.3340 revolutions/s). After loading a copy of the Great Sky Island save, the game-facing six-axis calls received physical motion and the player confirmed normal gyro aiming. This gameplay check used an input backport onto baseline `4f29560facd401364216dd25bb5762d99bd3d6b6`, matching the installed `dec5ee141a9f` shader libraries; the current-tree input path has automated coverage, not a new matching-chain gameplay pass. An initial current-chain host (`8393d85a4eae`) black-screened against those older libraries. Keep the host and shader-chain sources/libraries paired; do not rename libraries or spoof the chain header. The active save and shader libraries were not replaced. Long-session drift remains unmeasured.
 
+- **Host regression fixed; device shrine-exit verification pending:** [Sparse sampled textures read on a game worker](../../../docs/reference/nvn-objects.md#sparse-sampled-textures-read-on-a-game-worker). The reported `bake::ModuleMgr` abort and the API-level reproducer share the `ReadTexels` → upload-owner assertion; this is not a new gameplay pass claim.
+
 General host changes first needed here; each applies to every game:
 
 - **Resolved in the host: frame-step recovery after a 30 fps movie cap**: [The frame step after a 30 fps cap ends](../../../docs/reference/frame-rate.md#the-frame-step-after-a-30-fps-cap-ends). Modelled with the movie flag; no new gameplay recovery observation is claimed.
@@ -91,6 +93,8 @@ General host changes first needed here; each applies to every game:
 - **Slotted command lists** (`OP_RESERVE`, `t_nvn` "slotted lists"): [Prerecorded lists in slots of their measured size](../../../docs/reference/nvn-objects.md#prerecorded-lists-in-slots-of-their-measured-size).
 
 ## Open
+
+- First-shrine exit on iPad: validate the worker-readback candidate on the original route. The captured run aborted with `SIGABRT` and about 2.4 GB headroom, unlike the separate earlier `memory-highwater` termination. The shrine-area saves were backed up before any replacement build; do not overwrite or switch a player's active save for validation.
 
 - Texture layout: NVN's automatic block height now truncates for every game (`pick_tile(ah * 3 / 16)`). That changes layouts at 6–10, 17–21, 38–42 and 81–85 block rows, which matters for this game's flushed textures. Not re-checked here.
 - `game.tsv` still describes the game as "In bring-up", and some memory values as "Breath of the Wild's", not measured for this game.
