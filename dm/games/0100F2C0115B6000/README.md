@@ -72,6 +72,8 @@ Game-specific findings. The general host changes they led to are listed under [F
 
 ## Found on this game
 
+- **Resolved on the Mac with the SDL backend:** [Physical controller motion on the Mac](../../../docs/reference/services.md#physical-controller-motion-on-the-mac). A Bluetooth Mingpin S820 in Switch mode returned 2,084 physical samples over 20 s (peak 1.3340 revolutions/s). After loading a copy of the Great Sky Island save, the game-facing six-axis calls received physical motion and the player confirmed normal gyro aiming. This gameplay check used an input backport onto baseline `4f29560facd401364216dd25bb5762d99bd3d6b6`, matching the installed `dec5ee141a9f` shader libraries; the current-tree input path has automated coverage, not a new matching-chain gameplay pass. An initial current-chain host (`8393d85a4eae`) black-screened against those older libraries. Keep the host and shader-chain sources/libraries paired; do not rename libraries or spoof the chain header. The active save and shader libraries were not replaced. Long-session drift remains unmeasured.
+
 General host changes first needed here; each applies to every game:
 
 - **Resolved in the host: frame-step recovery after a 30 fps movie cap**: [The frame step after a 30 fps cap ends](../../../docs/reference/frame-rate.md#the-frame-step-after-a-30-fps-cap-ends). Modelled with the movie flag; no new gameplay recovery observation is claimed.

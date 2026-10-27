@@ -222,6 +222,13 @@ Most service calls can be found before they crash, before the first boot or the 
 - **Found on:** [Super Mario Odyssey](../../dm/games/0100000000010000/README.md): it reads all 16 history entries per sensor and ignores the count, like its npad history ([History reads fill every requested entry](#history-reads-fill-every-requested-entry)).
 - **Note:** find a game's swing detector by probing the accelerometer value it reads (`DM_PROBE=main:626248@x8+10` in Odyssey 1.4.1).
 
+### Physical controller motion on the Mac
+
+- **Symptom:** a Bluetooth Switch-mode controller has working sticks/buttons but no motion aiming in Tears of the Kingdom, although Cemu reads its gyroscope.
+- **Cause:** the SDL backend only read buttons and axes, never enabled or read the accelerometer/gyroscope. The host's six-axis hooks only generated a resting sensor or `DM_BTN_SHAKE`, with no physical-motion publishing interface.
+- **Fix:** the optional SDL2 backend enables both controller sensors and publishes motion independently of button events. SDL's [sensor units and axes](https://github.com/libsdl-org/SDL/blob/SDL2/include/SDL_sensor.h) are converted from m/s² and radians/s into G and revolutions/s in Switch axes. `dm_pad_motion` stores a locked, bounded history on the guest clock, integrates angular velocity into angle and a normalized quaternion direction, and routes it through the existing player/npad assignments. History reads fill every requested entry, newest first. Focus loss, disconnect, read failure and backend shutdown clear physical motion; merged input selects one motion source, never sums rigid bodies. Keyboard/scripted shake and the resting fallback remain available. This does not change the default Apple backend or iOS physical motion, nor implement the separate console `SevenSixAxisSensor`; orientation is gyro-integrated, not gravity-fused, so long-session drift remains to be measured. `DM_MOTION_LOG=1` emits a rate-limited receipt from the game-facing six-axis call, distinct from frontend-only samples.
+- **Found on:** [The Legend of Zelda: Tears of the Kingdom](../../dm/games/0100F2C0115B6000/README.md), reported with a Bluetooth Mingpin S820 in Switch mode. `make -C dm/host/tests GAME=0100F2C0115B6000 motion pad-sdl pad-sdl-front` covers the production SDL-to-HID path with sensor fixtures, unit/axis conversion, orientation, histories, routing and focus cleanup; it is not a gameplay pass.
+
 ### SDK 20 six-axis sensor and amiibo (`nfp`) calls
 
 - **Symptom:** SDK 20 calls that reach a service; `nfp`'s `AttachActivateEvent` / `AttachDeactivateEvent` crashed in the SDK at `sdk+0x3f2a78`.

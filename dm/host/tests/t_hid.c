@@ -1,11 +1,13 @@
 // Players and controllers (GitHub issue #74): the Mac front end's slot assignment (pad_slots.h) and the npads hle_hid.c reports for each player, docked and handheld, with the
 // game's supported npad ids; no controller, window or guest exists in this test (the hid take-overs are called directly, events are recorded by the stubs)
 #include <time.h>
+#include <dlfcn.h>
 static int hid_clock_gettime(clockid_t clock, struct timespec *ts);
 #define clock_gettime hid_clock_gettime
 #include "../hle_hid.c"
 #undef clock_gettime
 #include "../pad_slots.h"
+#include "../pad_sdl_mac.h"
 
 static int checks, fails, g_mode = 1, g_signals;
 static void *g_signalled;
@@ -13,7 +15,8 @@ static time_t rumble_second = 1;
 static int hid_clock_gettime(clockid_t clock, struct timespec *ts) { (void)clock; *ts = (struct timespec){.tv_sec = rumble_second}; return 0; }
 #define CHECK(c, msg) do { checks++; if (!(c)) { fails++; fprintf(stderr, "FAIL: %s (line %d)\n", msg, __LINE__); } } while (0)
 int dm_opmode(void) { return g_mode; }
-uint64_t guest_ns(void) { return 1000000000ull; }
+static uint64_t test_guest_ns = 1000000000ull;
+uint64_t guest_ns(void) { return test_guest_ns; }
 uint64_t now_ns(void) { return 1000000000ull; }
 uint64_t dm_guest_frame(void) { return 0; }
 void dm_touch_set(const dm_touch *t, int n) { (void)t; (void)n; }
@@ -114,6 +117,96 @@ static void t_npads(void) {
     CHECK(info[0] == 2 && info[1] == NPAD_HANDHELD, "handheld: the applet selects the handheld controller");
 }
 
+// Exercise the actual game-facing six-axis hook, independently of the physical backend.
+static void t_motion(void) {
+    g_mode = 1; ids((uint32_t[]){0, 1, NPAD_HANDHELD}, 3); dm_pad_players(3);
+    uint32_t h; h_hid_SixHandles(&h, 1, &(uint32_t){0}, STYLE_FULLKEY);
+    dm_motion m = {{0, 0, -1}, {0, 0, 1}};
+    dm_pad_motion(0, &m);
+    SixAxisState out[16]; h_hid_SixStates(out, 16, &h);
+    CHECK(out[0].gyro[2] == 1, "the game reads real controller angular velocity, not the resting stub");
+    test_guest_ns += 250000000;
+    dm_pad_motion(0, &m);
+    h_hid_SixState(out, &h);
+    CHECK(fabsf(out[0].angle[2] - .25f) < 1e-5f && fabsf(out[0].dir[1] - 1) < 1e-5f,
+          "a quarter turn updates integrated angle and orientation");
+    CHECK(!h_hid_SixRest(&h), "rotating hardware is not at rest");
+    h_hid_SixStates(out, 16, &h);
+    CHECK(out[0].sampling - out[15].sampling == 15 && out[15].gyro[2] == 1, "physical histories fill every requested entry");
+    dm_pad_motion(0, NULL); h_hid_SixState(out, &h);
+    CHECK(out[0].gyro[2] == 0 && out[0].dir[0] == 1, "focus loss clears physical rotation and orientation");
+    dm_pad_motion(1, &m); h_hid_SixState(out, &h);
+    CHECK(out[0].gyro[2] == 0, "a second player's motion does not leak into player 1");
+    ids((uint32_t[]){0, NPAD_HANDHELD}, 2); h_hid_SixState(out, &h);
+    CHECK(out[0].gyro[2] == 1, "one-player games route merged controller motion as well as buttons");
+    g_mode = 0; h_hid_SixHandles(&h, 1, &(uint32_t){NPAD_HANDHELD}, STYLE_HANDHELD); h_hid_SixState(out, &h);
+    CHECK(out[0].gyro[2] == 1, "handheld handles read the routed physical controller");
+    dm_pad_motion(1, NULL);
+    g_mode = 1; h_hid_SixHandles(&h, 1, &(uint32_t){0}, STYLE_FULLKEY);
+    dm_input_set(DM_BTN_SHAKE, 0, 0, 0, 0); test_guest_ns += 40000000;
+    h_hid_SixState(out, &h); CHECK(fabsf(out[0].acc[0]) > 1, "scripted shake remains available without physical motion");
+    dm_input_set(0, 0, 0, 0, 0); test_guest_ns += SHAKE_CYCLE_NS;
+    h_hid_SixState(out, &h); CHECK(out[0].gyro[2] == 0 && out[0].acc[2] == -1, "scripted shake returns to rest");
+}
+
+static void *motion_sender(void *arg) {
+    int p = (int)(intptr_t)arg;
+    dm_motion m = {{0, 0, -1}, {.1f, .2f, .3f}};
+    for (int i = 0; i < 1000; i++) dm_pad_motion(p, i % 37 ? &m : NULL);
+    return NULL;
+}
+static void *motion_reader(void *arg) {
+    (void)arg; uint32_t h = 0; SixAxisState s;
+    for (int i = 0; i < 1000; i++) {
+        h_hid_SixState(&s, &h);
+        CHECK(isfinite(s.gyro[2]) && fabsf(s.dir[0]*s.dir[0] + s.dir[1]*s.dir[1] + s.dir[2]*s.dir[2] - 1) < 1e-4f,
+              "concurrent physical publishing and HID history reads remain coherent");
+    }
+    return NULL;
+}
+static void t_motion_threads(void) {
+    g_mode = 1; ids((uint32_t[]){0, 1}, 2); dm_pad_players(3);
+    pthread_t threads[3]; int started = 0;
+    for (int i = 0; i < 3; i++) {
+        int rc = pthread_create(&threads[started], NULL, i == 2 ? motion_reader : motion_sender, (void *)(intptr_t)(i & 1));
+        // Avoid CHECK here: the reader owns the counters until it has joined.
+        if (rc) abort(); started++;
+    }
+    for (int i = 0; i < started; i++) pthread_join(threads[i], NULL);
+    dm_pad_motion(0, NULL); dm_pad_motion(1, NULL);
+}
+
+static void motion_from_sdl(void *ctx, int player, const dm_motion *m) { (void)ctx; dm_pad_motion(player, m); }
+static void buttons_from_sdl(void *ctx, int player, uint64_t b, int32_t lx, int32_t ly, int32_t rx, int32_t ry) {
+    (void)ctx; dm_pad_set_player(player, b, lx, ly, rx, ry);
+}
+static void players_from_sdl(void *ctx, uint32_t mask) { (void)ctx; dm_pad_players(mask); }
+static void t_motion_sdl(const char *library) {
+    void *lib = dlopen(library, RTLD_NOW | RTLD_LOCAL); CHECK(lib, "load sensor fixture"); if (!lib) return;
+    void (*reset)(void) = dlsym(lib, "fake_reset");
+    void (*add)(int, const char *) = dlsym(lib, "fake_add");
+    void (*set)(int, const float *, const float *) = dlsym(lib, "fake_motion");
+    CHECK(reset && add && set, "sensor fixture exports"); if (!reset || !add || !set) { dlclose(lib); return; }
+    reset(); char error[512];
+    test_guest_ns = (test_guest_ns + SIX_PERIOD_NS - 1) / SIX_PERIOD_NS * SIX_PERIOD_NS;
+    dm_sdl_pad *pad = dm_sdl_pad_create((dm_sdl_pad_sink){.state = buttons_from_sdl, .players = players_from_sdl, .motion = motion_from_sdl},
+                                       0, 0, library, error, sizeof error);
+    CHECK(pad, "create production SDL backend"); if (!pad) { dlclose(lib); return; }
+    g_mode = 1; ids((uint32_t[]){0}, 1);
+    add(0, "S820"); set(0, (float[]){0, 9.80665f, 0}, (float[]){0, 6.2831853f, 0});
+    dm_sdl_pad_poll(pad, 1);
+    uint32_t h; h_hid_SixHandles(&h, 1, &(uint32_t){0}, STYLE_FULLKEY); SixAxisState s;
+    h_hid_SixState(&s, &h);
+    CHECK(fabsf(s.gyro[2] - 1) < 1e-5f && fabsf(s.acc[2] + 1) < 1e-5f, "SDL sensor data reaches the game's actual HID hook in Switch units");
+    test_guest_ns += 250000000; dm_sdl_pad_poll(pad, 1); h_hid_SixState(&s, &h);
+    CHECK(fabsf(s.dir[1] - 1) < 1e-5f, "SDL motion rotates game-facing orientation without button events");
+    dm_sdl_pad_poll(pad, 0); h_hid_SixState(&s, &h);
+    CHECK(s.gyro[2] == 0 && s.dir[0] == 1, "focus loss clears motion all the way through HID");
+    dm_sdl_pad_poll(pad, 1); dm_sdl_pad_destroy(pad); h_hid_SixState(&s, &h);
+    CHECK(s.gyro[2] == 0, "backend destruction leaves no stale motion in HID");
+    dlclose(lib);
+}
+
 static dm_haptic_state vibration[DM_PLAYERS];
 static int vibration_calls;
 static void vibration_sink(dm_haptic_state s) { vibration[s.player] = s; vibration_calls++; }
@@ -206,10 +299,13 @@ static void t_rumble_log(void) {
     unsetenv("DM_RUMBLE_LOG");
 }
 
-int main(void) {
+int main(int argc, char **argv) {
     CHECK(setenv("DM_RUMBLE_LOG", "1", 1) == 0, "enable rumble diagnostics");
     t_slots();
     t_npads();
+    t_motion();
+    if (argc > 1) t_motion_sdl(argv[1]);
+    t_motion_threads();
     t_vibration();
     t_rumble_log();
     printf("hid players: %d checks, %d failed\n", checks, fails);
