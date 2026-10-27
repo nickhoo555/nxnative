@@ -49,8 +49,10 @@ typedef struct { const char *name; void *fn; const char *why; } hle_force_ent;
 // Operation mode (0 handheld / 1 docked): owned by hle_oe.c, and the hid controller style follows it; the front end can switch it at runtime
 int dm_opmode(void);
 void dm_set_opmode(int m);          // On change, push notification 30 / 31 according to the switches the game has turned on
-// Focus (1 foreground / 2 focus lost / 3 background): called by the front end on lifecycle changes; a change pushes notification 15
+// Horizon focus (1 foreground / 2 library applet / 3 background): a change pushes notification 15 when the policy allows it
 void dm_focus_set(int st);
+int dm_focus_mode(void);   // Horizon policy: 1 keeps running out of focus; 0/2 suspend in Background, 3 always suspends
+void dm_focus_policy_observe(void (*changed)(void));   // composition root schedules policy reapplication on its own thread
 // Audio pause / resume following the lifecycle (called by the front end on going to background / returning to foreground)
 extern uint8_t *dm_fps_state;   // frame step state page (loader.c install_fps_state): +0 float target fps, +4 movie flag, +0x10 float render scale, +0x18 double game seconds stepped; NULL when the build has none
 int dm_mouse_camera(void);             // 1 = the game turns its camera by the mouse (loader.c; a build with a mouse-camera stub and DM_KBM=1: keyboard and mouse controls, opt in)

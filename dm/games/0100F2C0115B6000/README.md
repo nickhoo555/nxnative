@@ -78,6 +78,7 @@ Game-specific findings. The general host changes they led to are listed under [F
 - The issue #70 save: `DM_KEYS="20:A*6/4,f2480:LUp~5"` (title, load, jump, steer into the pond).
 - The issue #147 short streaming route uses a fresh copy of the issue #70 save and its corrected SDK module: `DM_FPS_TARGET=30 DM_KEYS="20:A*6/4,f2480:LUp~9,f4000:LUp~20,f4700:LRight~5,f5000:LUp~20"`, run for at least 220 s. This is a fall/respawn stress route, ending at Game Over in both short comparison runs; it is not a long surviving traversal test. The movement timings are repeatable, but the upload burst varies with streaming and CPU/GPU timing, so the deterministic staging regression complements it.
 - The in-cave autosave (`run/save`): keys `f2500:A,f2800:A,f3100:A,f3600:A`, shot at frame 4500. `DM_DETCLOCK` cannot be used: the game stops at frame 1 waiting for guest time.
+- **Mac title-to-opening loading stall: lifecycle mapping corrected; M5 fullscreen retest pending.** The original M5 clean-save run kept drawing the black loading overlay beyond frame 25,500; an unchanged relaunch reached the opening, which alone was not a fix. A prolonged incorrect focus-2 transition subsequently reproduced it with isolated fresh saves on the M4. See [Mac key-window focus is not application lifecycle](../../../docs/reference/services.md#mac-key-window-focus-is-not-application-lifecycle) for the mechanism, replay and generic host correction. The local fixed host retains the PR #330 keyboard/mouse integration and shader chain `8393d85a4eae`; a separate windowed clean-save run reached the opening, and a fullscreen adapter replay passed the original black/loading detector. The player confirmed clicking the green fullscreen button before the original stall. The exact M5 sequence and the game's internal loading-completion dependency remain unverified; SSH became unreachable before deployment. Do not replace the player's save or remove caches as a purported fix.
 
 ## Found on this game
 
@@ -88,6 +89,8 @@ Game-specific findings. The general host changes they led to are listed under [F
 - **Host regression fixed; device shrine-exit verification pending:** [Sparse sampled textures read on a game worker](../../../docs/reference/nvn-objects.md#sparse-sampled-textures-read-on-a-game-worker). The reported `bake::ModuleMgr` abort and the API-level reproducer share the `ReadTexels` → upload-owner assertion; this is not a new gameplay pass claim.
 
 General host changes first needed here; each applies to every game:
+
+- **Mac application lifecycle and key-window ownership:** [Mac key-window focus is not application lifecycle](../../../docs/reference/services.md#mac-key-window-focus-is-not-application-lifecycle).
 
 - **Resolved in the host: frame-step recovery after a 30 fps movie cap**: [The frame step after a 30 fps cap ends](../../../docs/reference/frame-rate.md#the-frame-step-after-a-30-fps-cap-ends). Modelled with the movie flag; no new gameplay recovery observation is claimed.
 

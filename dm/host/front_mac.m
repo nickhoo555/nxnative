@@ -206,6 +206,28 @@ static void input_resume(void) {
     if (g_merge) { for (GCController *c in GCController.controllers) if (c.extendedGamepad) pad_read(c.extendedGamepad); }
     else for (int p = 0; p < DM_PLAYERS; p++) if (g_held[p].extendedGamepad) pad_read(g_held[p].extendedGamepad);
 }
+// Key-window ownership controls input, not application lifecycle: fullscreen can temporarily resign the key window while the app stays active.
+// Leaving the app / minimizing is Horizon Background (3), not the library-applet OutOfFocus (2). Suspend execution as requested by the game's policy;
+// notifying a game of 2 and leaving clocks/workers running while its main loop blocks can strand its loading screen (TOTK's opening).
+static int g_app_suspended;
+static void front_focus_update(int key, int active, int minimized) {
+    int focused = active && !minimized, input = key && focused;
+    if (!input && front_input_on) input_release();
+    if (!focused) dm_focus_set(3);
+    int suspend = !focused && dm_focus_mode() != 1;   // NoSuspend must remain runnable even in Background
+    if (suspend != g_app_suspended) {
+        if (suspend) { guest_clock_freeze_for(1, 1); dm_audio_suspend(1); dm_gfx_suspend(1); }
+        else { dm_gfx_suspend(0); guest_clock_freeze_for(1, 0); dm_audio_suspend(0); }
+        g_app_suspended = suspend;
+    }
+    if (input && !front_input_on) input_resume();
+    if (focused) dm_focus_set(1);   // the guest must not see foreground before execution has resumed
+}
+static void front_focus_policy_changed(void) {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if (g_win) front_focus_update(g_win.keyWindow, NSApp.active, g_win.miniaturized);
+    });
+}
 static void pads_start(void) {
     const char *e = getenv("DM_PAD_MERGE"); g_merge = e && atoi(e);
     e = getenv("DM_KBD_PLAYER"); g_kbd_own = !g_merge && e && !strcmp(e, "own");
@@ -330,18 +352,22 @@ void front_run(void (*guest)(void)) {
         }];
         [[NSNotificationCenter defaultCenter] addObserverForName:NSWindowWillCloseNotification object:win queue:nil
                                                       usingBlock:^(NSNotification *n) { (void)n; sdl_shutdown(); exit(0); }];
-        // Lifecycle (hle.h / dm.h): focus lost → 2, focus regained → 1; minimized → 3 + audio paused + GPU suspended, restored → resume (followed by focus regained → 1).
-        // Input is released when the window stops being key (and when it is minimized) and taken up again when it is key again
+        // App activation drives lifecycle; key-window notifications only change input while the app remains active.
+        // Both kinds and minimization feed the same idempotent adapter, independent of AppKit's notification order.
         NSNotificationCenter *nc = NSNotificationCenter.defaultCenter;
         [nc addObserverForName:NSWindowDidChangeScreenNotification object:win queue:nil usingBlock:^(NSNotification *n) { (void)n; if (win.screen) { g_screen_fps = (int)win.screen.maximumFramesPerSecond; g_layer.contentsScale = win.backingScaleFactor; } screen_match_apply(); }];
         // Entering and leaving fullscreen: the layer is layer-backed, so its frame (and with it the drawable) follows the
         // content view by itself; only the scale factor has to be carried over to the screen the window ended up on. The screen's rate is matched in fullscreen only (screen_match_apply)
         [nc addObserverForName:NSWindowDidEnterFullScreenNotification object:win queue:nil usingBlock:^(NSNotification *n) { (void)n; g_layer.contentsScale = win.backingScaleFactor; screen_match_apply(); }];
         [nc addObserverForName:NSWindowDidExitFullScreenNotification object:win queue:nil usingBlock:^(NSNotification *n) { (void)n; g_layer.contentsScale = win.backingScaleFactor; screen_match_apply(); }];
-        [nc addObserverForName:NSWindowDidResignKeyNotification object:win queue:nil usingBlock:^(NSNotification *n) { (void)n; input_release(); if (!win.miniaturized) dm_focus_set(2); }];
-        [nc addObserverForName:NSWindowDidBecomeKeyNotification object:win queue:nil usingBlock:^(NSNotification *n) { (void)n; input_resume(); dm_focus_set(1); }];
-        [nc addObserverForName:NSWindowDidMiniaturizeNotification object:win queue:nil usingBlock:^(NSNotification *n) { (void)n; input_release(); dm_focus_set(3); dm_audio_suspend(1); dm_gfx_suspend(1); }];
-        [nc addObserverForName:NSWindowDidDeminiaturizeNotification object:win queue:nil usingBlock:^(NSNotification *n) { (void)n; dm_gfx_suspend(0); dm_audio_suspend(0); dm_focus_set(2); }];
+        [nc addObserverForName:NSWindowDidResignKeyNotification object:win queue:nil usingBlock:^(NSNotification *n) { (void)n; front_focus_update(0, NSApp.active, win.miniaturized); }];
+        [nc addObserverForName:NSWindowDidBecomeKeyNotification object:win queue:nil usingBlock:^(NSNotification *n) { (void)n; front_focus_update(1, NSApp.active, win.miniaturized); }];
+        [nc addObserverForName:NSWindowDidMiniaturizeNotification object:win queue:nil usingBlock:^(NSNotification *n) { (void)n; front_focus_update(0, NSApp.active, 1); }];
+        [nc addObserverForName:NSWindowDidDeminiaturizeNotification object:win queue:nil usingBlock:^(NSNotification *n) { (void)n; front_focus_update(win.keyWindow, NSApp.active, 0); }];
+        [nc addObserverForName:NSApplicationDidResignActiveNotification object:NSApp queue:nil usingBlock:^(NSNotification *n) { (void)n; front_focus_update(win.keyWindow, 0, win.miniaturized); }];
+        [nc addObserverForName:NSApplicationDidBecomeActiveNotification object:NSApp queue:nil usingBlock:^(NSNotification *n) { (void)n; front_focus_update(win.keyWindow, 1, win.miniaturized); }];
+        dm_focus_policy_observe(front_focus_policy_changed);
+        front_focus_update(win.keyWindow, NSApp.active, win.miniaturized);
         // Guest thread: 64 MiB stack (the Switch main thread stack is specified by npdm; the host gives plenty)
         static guest_arg ga; ga.fn = guest;
         pthread_attr_t a; pthread_attr_init(&a); pthread_attr_setstacksize(&a, 64u << 20);
