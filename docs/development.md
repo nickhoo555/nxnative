@@ -214,6 +214,10 @@ Relative output and variant paths are resolved from the terminal's working direc
 
 The benchmark gives each frame's GPU time; these switches split it by pass, on the Mac or on an iPhone (`Documents/env.txt`), and are off by default: `DM_NVN_GPUPROF=every:<n>` (each encoder's GPU time and attachment traffic in one frame of every n), `DM_NVN_PASSDUMP=every:<n>`, `DM_AB=<frames>` (switches set to `ab` alternate in phases of one run) and `DM_GPU_CAPTURE` (Metal GPU traces for Xcode, written to `DM_GPU_CAPTURE_DIR`, by default `gpu_captures/` in the working directory, which keeps the newest `DM_GPU_CAPTURE_KEEP`; an IPA built with `DM_METAL_CAPTURE=1`, or `MTL_CAPTURE_ENABLED=1` on the Mac). `dm/tools/gpuprof.py` reads their log lines. How to use them: [05, GPU time on the device](agents/05-debugging.md#gpu-time-on-the-device).
 
+### Keyboard and mouse camera (Mac)
+
+The optional Tears of the Kingdom 1.4.3 keyboard/mouse controls from upstream PR #330 require rewritten modules carrying `MOUSE_CAMERA` and `DM_KBM=1`; changing the switch alone does not update an older app. `DM_MOUSE_SENS` sets degrees per input count (default `0.1`, greater than zero and at most `10`), and `DM_MOUSE_INVERT_Y=1` reverses vertical look. The [game note](../dm/games/0100F2C0115B6000/README.md#keyboard-and-mouse) lists the layout and camera limitations. SDL controller input remains independent of this optional keyboard/mouse path.
+
 ### A Mac app
 
 `--platform mac-app` (`PLATFORM = 'mac-app'` in Spyder) builds everything `--platform mac` builds, then packs a Mac app of the game with `dm/mac/pack_app.py`. The app is `<NSP folder>/<game name>.app` (a `:` or `/` in the name becomes ` - `); `-o` names another path ending in `.app`. Open it from Finder, from any folder: it does not need the build folder or the drive it is on. Like the Mac host, it needs a Mac with Apple silicon. Its name, version and bundle ID are the IPA's: the game name and display version from the control data, and `org.nxnative.<title ID>`. Its icon is the game's icon as `AppIcon.icns` (`sips`, `iconutil`).

@@ -172,7 +172,7 @@ pad-sdl-front: $(B)/t_front_pad_mac $(B)/fake_sdl2.dylib
 	$(B)/t_front_pad_mac $(abspath $(B)/fake_sdl2.dylib) sdl
 	$(B)/t_front_pad_mac /no/such/SDL2.dylib fallback
 	$(B)/t_front_pad_mac /no/such/SDL2.dylib apple
-$(B)/t_front_pad_mac: t_front_pad_mac.m ../front_mac.m ../pad_sdl_mac.c ../pad_sdl_mac.h ../hle_haptics.c ../hle_haptics.h $(GAME_H) | $(B)
+$(B)/t_front_pad_mac: t_front_pad_mac.m ../front_mac.m ../front_kbm_mac.m ../front_kbm_mac.h ../pad_sdl_mac.c ../pad_sdl_mac.h ../hle_haptics.c ../hle_haptics.h $(GAME_H) | $(B)
 	clang -O1 -g -Wall -Werror -Wno-unused-function -Wno-unused-but-set-variable $(GINC) -fobjc-arc -o $@ t_front_pad_mac.m ../pad_sdl_mac.c ../hle_haptics.c -framework Cocoa -framework QuartzCore -framework Metal -framework GameController
 $(B)/t_pad_sdl: t_pad_sdl.c ../pad_sdl_mac.c ../pad_sdl_mac.h ../pad_slots.h ../dm_input.h | $(B)
 	clang -O1 -g -Wall -Wextra -Werror -o $@ t_pad_sdl.c ../pad_sdl_mac.c
@@ -202,3 +202,11 @@ $(B)/t_pad_sdl_live: t_pad_sdl_live.c ../pad_sdl_mac.c ../pad_sdl_mac.h ../pad_s
 run: motion
 motion: $(B)/t_hid $(B)/fake_sdl2.dylib
 	$(B)/t_hid $(abspath $(B)/fake_sdl2.dylib)
+
+# A pointer may produce AppKit motion without a raw GameController mouse device.
+.PHONY: kbm-pointer
+kbm-pointer: $(B)/t_kbm_pointer_mac
+	$(B)/t_kbm_pointer_mac
+run: kbm-pointer
+$(B)/t_kbm_pointer_mac: t_kbm_pointer_mac.m ../front_kbm_mac.m ../front_kbm_mac.h $(GAME_H) | $(B)
+	clang -O1 -g -Wall -Werror -Wno-unused-function $(GINC) -fobjc-arc -o $@ t_kbm_pointer_mac.m -framework Cocoa -framework QuartzCore -framework GameController
