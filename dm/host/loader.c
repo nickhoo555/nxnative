@@ -254,9 +254,11 @@ void dm_fps_state_apply(void) {
     if (t != 0 && t != 30 && t != 60) { LOG("[RED] DM_FPS_TARGET=%s: must be 0, 30 or 60; using the game's own frame step", e); t = 0; }
     float f = (float)t; memcpy(dm_fps_state, &f, sizeof f);
     // Render scale of the 3D views (the stubs at Tears of the Kingdom's main+0xd5cc0, Breath of the Wild's main+0x1266880): 1.0 keeps the game's own size and dynamic resolution;
-    // another factor fixes the size at that fraction (DM_RENDER_SCALE, 0.5 to 1.0). Independent of the frame step: written at target 0 too
+    // another factor fixes the size at that multiple. Mac supersampling is experimental: a game's render-target pool may impose a lower limit; iOS keeps its tested 0.5..1 range.
+    // Independent of the frame step: written at target 0 too
+    const float scale_max = TARGET_OS_OSX ? 3.0f : 1.0f;
     const char *rs = getenv("DM_RENDER_SCALE"); float sc = 1.0f;
-    if (rs) { char *end; sc = strtof(rs, &end); if (end == rs || *end || !(sc >= 0.5f && sc <= 1.0f)) { LOG("[RED] DM_RENDER_SCALE=%s: must be 0.5 to 1.0; keeping the game's size", rs); sc = 1.0f; } else LOG("%s: 3D views rendered at %.2f of the game's size (DM_RENDER_SCALE)", g_fps_mod, sc); }
+    if (rs) { char *end; sc = strtof(rs, &end); if (end == rs || *end || !(sc >= 0.5f && sc <= scale_max)) { LOG("[RED] DM_RENDER_SCALE=%s: must be 0.5 to %.1f; keeping the game's size", rs, scale_max); sc = 1.0f; } else LOG("%s: 3D views rendered at %.2f of the game's size (DM_RENDER_SCALE)", g_fps_mod, sc); }
     memcpy(dm_fps_state + 0x10, &sc, sizeof sc);
     // Keyboard and mouse controls (the front end's PC layout with the mouse turning the camera): DM_MOUSE_SENS degrees per mouse count (0.1 by default: about 100 degrees
     // per inch at 1000 counts per inch), DM_MOUSE_INVERT_Y=1 turns the vertical direction around. Opt in with DM_KBM=1: otherwise the game keeps the classic keys, as
