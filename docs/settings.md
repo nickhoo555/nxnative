@@ -24,6 +24,8 @@ Games whose speed the app controls (Breath of the Wild, Tears of the Kingdom and
 
 The size of the 3D picture, from 50 to 100 %. Below 100 % the size is fixed there and the game's own dynamic resolution is off; 100 % keeps the game's own. Lower can be lighter on the GPU but is blurrier; the HUD and text keep their sharpness. Only games the app can scale offer it.
 
+The Mac host also accepts `DM_RENDER_SCALE` up to `3.0` for experiments; the iOS slider and loader still stop at `1.0`. Above `1.0`, a game may exhaust its own render-resource pools before drawing anything, regardless of the Mac's available memory. Verify the render targets, viewports and output, not just the accepted setting. [Tears of the Kingdom's experiment](../dm/games/0100F2C0115B6000/README.md#mac-supersampling-experiment) requires matching resource-budget overlays and a derived Mac memory profile; it now renders internally at 1440p/4K, but its output remains 1080p.
+
 ### Console mode
 
 **Docked** renders at the Switch's TV resolution, **Handheld** at its lower handheld resolution, which is lighter on the phone and can give a higher frame rate.
@@ -180,7 +182,7 @@ A line like `DM_PRESENT_SNAP=0` in `Documents/env.txt` (in the Files app, under 
 | Setting | Variable | Values |
 |---|---|---|
 | Frame rate | `DM_FPS_TARGET` | `30`, `60` |
-| Render scale | `DM_RENDER_SCALE` | `0.5` to `1.0` |
+| Render scale | `DM_RENDER_SCALE` | `0.5` to `1.0` on iOS; `0.5` to `3.0` on Mac (above `1.0` is experimental) |
 | Console mode | `DM_OPMODE` | `1` docked, `0` handheld |
 | Game language | `DM_LANG` | a language code, such as `ja` |
 | Frame-rate counter | `DM_SHOW_FPS` | `1`, `0` |
