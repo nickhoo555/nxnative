@@ -16,6 +16,8 @@ void hle_bind_system_event(void *g, int autoclear) { (void)g; (void)autoclear; e
 void hle_signal_system_event(void *g) { (void)g; ev_sig = 1; }
 void hle_clear_system_event(void *g) { (void)g; ev_sig = 0; }
 static int checks, fails;
+static int policy_changes, policy_seen;
+static void policy_changed(void) { policy_changes++; policy_seen = dm_focus_mode(); }
 #define CHECK(c, s) do { checks++; int ok = !!(c); fails += !ok; printf("%s %s\n", ok ? "✓" : "✗", s); } while (0)
 static void reset(void) { g_mqh = g_mqn = 0; g_focus = 1; g_opmode = 1; g_ntf_opmode = g_ntf_perfmode = 0; g_focus_mode = -1; }
 static int pop_is(uint32_t want) { uint32_t m = 999; return h_oe_TryPopMsg(&m) && m == want; }
@@ -122,5 +124,14 @@ int main(void) {
     CHECK(pop_is(15) && empty(), "focus mode 2: focus notification 15");
     h_oe_SetFocusMode(1); dm_focus_set(2);
     CHECK(pop_is(15) && empty(), "focus mode 1: focus notification 15");
+    dm_focus_policy_observe(policy_changed);
+    h_oe_SetFocusMode(2);
+    CHECK(dm_focus_mode() == 2 && policy_seen == 2 && policy_changes == 1, "composition root observes the new policy after it is stored");
+    h_oe_SetFocusMode(2);
+    CHECK(policy_changes == 1, "setting the same focus policy does not schedule duplicate platform work");
+    h_oe_SetFocusMode(1);
+    CHECK(dm_focus_mode() == 1 && policy_seen == 1 && policy_changes == 2, "NoSuspend can be reapplied while already inactive");
+    dm_focus_policy_observe(NULL); h_oe_SetFocusMode(0);
+    CHECK(dm_focus_mode() == 0 && policy_changes == 2, "unregistered policy observer is not called");
     printf("== oe %d checks, %d failed ==\n", checks, fails); return fails != 0;
 }

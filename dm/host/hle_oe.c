@@ -62,6 +62,10 @@ static _Atomic int g_focus = 1; static _Atomic uint64_t g_focus_in_ns;   // time
 // the system suspends the game out of focus and it never sees message 15 (the host's suspend is the guest clock freeze and the graphics gate). Super Mario Galaxy 2 sets 3, and
 // its Wii layer's pause on focus 2 (main+0x663ba0) never finished: the main loop waits for the GX thread to pause (main+0x5ce870), which waits for work the paused CPU never sends
 static _Atomic int g_focus_mode = -1;
+typedef void (*focus_policy_fn)(void);
+static _Atomic(focus_policy_fn) g_focus_policy_changed;
+int dm_focus_mode(void) { return atomic_load(&g_focus_mode); }
+void dm_focus_policy_observe(void (*changed)(void)) { atomic_store(&g_focus_policy_changed, changed); }
 static int focus_notifies(void) { int m = atomic_load(&g_focus_mode); return m != 0 && m != 3; }   // no mode set: notify, as before
 int dm_focus_now(void) { return atomic_load(&g_focus); }
 uint64_t dm_focus_in_since(void) { return atomic_load(&g_focus_in_ns); }   // graphics layer display link watchdog: stalls are only computed while active, counted from activation (nvn_mtl.m mtl_present_wait)
@@ -173,7 +177,10 @@ static pthread_once_t g_oe_once = PTHREAD_ONCE_INIT;
 
 HLE_FORCE("_ZN2nn2oe20GetCurrentFocusStateEv", "foreground / background state; driven by the front end's dm_focus_set", int, h_oe_GetFocus, void) { return g_focus; }
 HLE_FORCE("_ZN2nn2oe20SetFocusHandlingModeENS0_17FocusHandlingModeE", "focus handling mode; 1 and 2 get focus notifications, 0 and 3 none (see g_focus_mode)", void, h_oe_SetFocusMode, int m) {
-    atomic_store(&g_focus_mode, m); LOG("oe::SetFocusHandlingMode %d (%s)", m, focus_notifies() ? "focus notifications" : "suspended out of focus, no focus notifications");
+    int old = atomic_exchange(&g_focus_mode, m);
+    LOG("oe::SetFocusHandlingMode %d (%s)", m, focus_notifies() ? "focus notifications" : "suspended out of focus, no focus notifications");
+    focus_policy_fn changed = atomic_load(&g_focus_policy_changed);
+    if (old != m && changed) changed();   // no platform work on the calling guest thread
 }
 
 // Notification: returns bool (w0), the host has no system notifications

@@ -10,6 +10,7 @@ run: $(B)/t_heap_size $(B)/t_touch $(B)/t_gesture $(B)/t_oe $(B)/t_fs $(B)/t_fs_
 	$(B)/t_touch
 	$(B)/t_gesture
 	$(B)/t_oe 2>/dev/null
+	$(B)/t_front_lifecycle_mac
 	$(B)/t_fs 2>/dev/null
 	TMPDIR="$(abspath $(B))" $(B)/t_fs_commit_list
 	$(B)/t_thread_leak
@@ -168,6 +169,12 @@ pad-sdl: $(B)/t_pad_sdl $(B)/fake_sdl2.dylib $(B)/fake_sdl2_incomplete.dylib
 	$(B)/t_pad_sdl $(abspath $(B)/fake_sdl2.dylib) $(abspath $(B)/fake_sdl2_incomplete.dylib)
 run: pad-sdl-front
 .PHONY: pad-sdl-front
+run: $(B)/t_front_lifecycle_mac
+.PHONY: front-lifecycle
+front-lifecycle: $(B)/t_front_lifecycle_mac
+	$(B)/t_front_lifecycle_mac
+$(B)/t_front_lifecycle_mac: t_front_lifecycle_mac.m ../front_mac.m ../front_kbm_mac.m ../front_kbm_mac.h ../pad_sdl_mac.c ../hle_haptics.c $(GAME_H) | $(B)
+	clang -O1 -g -Wall -Werror -Wno-unused-function -Wno-unused-but-set-variable $(GINC) -fobjc-arc -o $@ t_front_lifecycle_mac.m ../pad_sdl_mac.c ../hle_haptics.c -framework Cocoa -framework QuartzCore -framework Metal -framework GameController
 pad-sdl-front: $(B)/t_front_pad_mac $(B)/fake_sdl2.dylib
 	$(B)/t_front_pad_mac $(abspath $(B)/fake_sdl2.dylib) sdl
 	$(B)/t_front_pad_mac /no/such/SDL2.dylib fallback

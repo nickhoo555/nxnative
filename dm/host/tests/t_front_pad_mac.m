@@ -24,6 +24,9 @@ void dm_pad_players(uint32_t mask) { players = mask; }
 uint32_t dm_player_npad(int p) { return (uint32_t)p; }
 void dm_touch_set(const dm_touch *t, int n) { (void)t; (void)n; }
 void dm_focus_set(int n) { (void)n; }
+int dm_focus_mode(void) { return 2; }
+void dm_focus_policy_observe(void (*changed)(void)) { (void)changed; }
+void guest_clock_freeze_for(int reason, int on) { (void)reason; (void)on; }
 void dm_audio_suspend(int n) { (void)n; }
 void dm_gfx_suspend(int n) { (void)n; }
 void dm_haptics_apple_init(void) { apple_init++; }
